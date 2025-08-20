@@ -3,6 +3,7 @@ const cors = require('cors')
 const dotenv = require('dotenv')
 const axios = require('axios');
 
+dotenv.config();
 const app = express()
 const port = process.env.PORT || 3001
 
@@ -18,22 +19,23 @@ const CACHE_DURATION = 60000;
 const getStockData = async (symbol) => {
   try {
     const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
-    const url = 'https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${apiKey}';
-    
+    const url = `https://www.alphavantage.co/query?function=GLOBAL_QUOTE&symbol=${symbol}&apikey=${apiKey}`;
+
     const response = await axios.get(url);
     const quote = response.data['Global Quote'];
 
     if (!quote || Object.keys(quote).length === 0) {
       return getSimulatedData(symbol);
-  }
+    }
 
     return {
       symbol: quote['01. symbol'],
-      price: parseFloat(quote['05. price']),
-      change: parseFloat(quote['09. change percent']),
-      changePercent: parseFloat(quote['10. change percent']),
-      lastUpdated: quote['07. latest trading day'],
-      isReal: true
+      price: parseFloat(quote['05. price']) || 0,
+      change: parseFloat(quote['09. change']) || 0,
+      changePercent: parseFloat(quote['10. change percent']?.replace('%', '')) || 0,
+      lastUpdated: quote['07. latest trading day'] || new Date().toISOString().split('T')[0],
+      isReal: true,
+      source: 'Alpha Vantage'
     };
   } catch (error) {
     console.error(`Error fetching data for ${symbol}:`, error);
@@ -95,6 +97,40 @@ app.get('/api/stocks', async (req, res) => {
     });
   }
 });
+
+app.get('/api/stocks/:symbol', async (req, res) => {
+  const { symbol } = req.params;
+  const upperSymbol = symbol.toUpperCase();
+  
+  console.log(`🔍 Search request for symbol: ${upperSymbol}`);
+  
+  try {
+    const result = await getStockData(upperSymbol);
+    
+    res.json({
+      success: true,
+      data: result,
+      debug: {
+        apiKey: !!process.env.ALPHA_VANTAGE_API_KEY,
+        timestamp: new Date().toISOString(),
+        isReal: result.isReal,
+        source: result.source
+      }
+    });
+  } catch (error) {
+    console.error(`❌ Error fetching stock ${upperSymbol}:`, error);
+    res.status(500).json({
+      success: false,
+      error: `Failed to fetch stock data for ${upperSymbol}`,
+      debug: {
+        errorMessage: error.message,
+        timestamp: new Date().toISOString()
+      }
+    });
+  }
+});
+
+
 app.get('/health', (req, res) => {
   res.json({ 
     status: 'OK', 
